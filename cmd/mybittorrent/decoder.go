@@ -22,6 +22,8 @@ func Decode(bencodedString string, index *int) (interface{}, error) {
 		return decodeList(bencodedString, index)
 	case 'i':
 		return decodeInteger(bencodedString, index)
+	case 'd':
+		return decodeDict(bencodedString, index)
 	default:
 		if unicode.IsDigit(rune(bencodedString[*index])) {
 			return decodeString(bencodedString, index)
@@ -59,18 +61,18 @@ func decodeInteger(bencodedString string, index *int) (int, error) {
 	}
 	start := *index + 1
 	end := start
-	
+
 	for end < len(bencodedString) && bencodedString[end] != 'e' {
 		end++
 	}
 
-	*index = end + 1 // Move past 'e' 
+	*index = end + 1 // Move past 'e'
 	return strconv.Atoi(bencodedString[start:end])
 }
 
 // decodeList handles decoding of bencoded lists, now using an index.
 func decodeList(bencodedString string, index *int) ([]interface{}, error) {
-	list:= make([]interface{}, 0)
+	list := make([]interface{}, 0)
 
 	for *index < len(bencodedString) && bencodedString[*index] != 'e' {
 		element, err := Decode(bencodedString, index)
@@ -83,6 +85,27 @@ func decodeList(bencodedString string, index *int) ([]interface{}, error) {
 	return list, nil
 }
 
+func decodeDict(bencodedString string, index *int) (map[string]interface{}, error) {
+
+	*index += 1 // Move past 'd'
+	dict := make(map[string]interface{})
+
+	for *index < len(bencodedString) && bencodedString[*index] != 'e' {
+		key, err := decodeString(bencodedString, index)
+		if err != nil {
+			return nil, err
+		}
+		value, err := Decode(bencodedString, index)
+		if err != nil {
+			return nil, err
+		}
+		dict[key] = value
+	}
+
+	*index += 1 // Move past 'e'
+	return dict, nil
+}
+
 // findFirstColon finds the index of the first colon in the substring of the string from the start.
 func findFirstColon(s string) int {
 	for i, c := range s {
@@ -92,4 +115,3 @@ func findFirstColon(s string) int {
 	}
 	return -1
 }
-
