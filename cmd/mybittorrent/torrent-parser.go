@@ -1,12 +1,13 @@
 package main
 
 import (
+	"crypto/sha1"
 	"fmt"
+	bencode "github.com/jackpal/bencode-go"
 	"os"
 )
 
 func parseTorrentFile(torrentFilePath string, startIndex int) {
-
 
 	torrentInfo, err := os.ReadFile(torrentFilePath)
 
@@ -36,5 +37,16 @@ func parseTorrentFile(torrentFilePath string, startIndex int) {
 
 	fmt.Println("Tracker URL:", announce)
 	fmt.Println("File Length:", fileLength)
+
+	hash := sha1.New()
+
+	if err := bencode.Marshal(hash, infoDict); err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	infoHash := hash.Sum(nil)
+
+	fmt.Printf("Info Hash: %x\n", infoHash)
 
 }

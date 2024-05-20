@@ -35,6 +35,7 @@ func main() {
 
 		parseTorrentFile(torrentFile, startIndex)
 
+
 	default:
 		{
 			fmt.Println("Invalid command")
