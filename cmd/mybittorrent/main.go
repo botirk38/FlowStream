@@ -3,12 +3,8 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"net/http"
-	"net/url"
 	"os"
-	"strconv"
 
-	bencode "github.com/jackpal/bencode-go" // Available if you need it!
 )
 
 type TrackerResponse struct {
@@ -74,45 +70,14 @@ func main() {
 			return
 		}
 
-		urlLink, err := url.Parse(torrent.Announce)
+		peers, err := getPeers(torrent.Announce, infoHash, torrent.Info.Length)
 
 		if err != nil {
 			fmt.Println(err)
 			return
 		}
 
-		query := urlLink.Query()
-		query.Set("info_hash", string(infoHash))
-		query.Set("peer_id", "00112233445566778898")
-		query.Set("port", "6881")
-		query.Set("uploaded", "0")
-		query.Set("downloaded", "0")
-		query.Set("left", strconv.Itoa(torrent.Info.PieceLength))
-		query.Set("compact", "1")
-
-		urlLink.RawQuery = query.Encode()
-
-		response, err := http.Get(urlLink.String())
-
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-
-		defer response.Body.Close()
-
-		var trackerRes TrackerResponse
-
-		if err := bencode.Unmarshal(response.Body, &trackerRes); err != nil {
-			fmt.Println(err)
-			return
-		}
-
-		for i := 0; i < len(trackerRes.Peers); i += 6 {
-			ip := fmt.Sprintf("%d.%d.%d.%d", trackerRes.Peers[i], trackerRes.Peers[i+1], trackerRes.Peers[i+2], trackerRes.Peers[i+3])
-			port := int(trackerRes.Peers[i+4])<<8 | int(trackerRes.Peers[i+5])
-			fmt.Printf("%s:%d\n", ip, port)
-		}
+		printPeers(peers)
 
 	default:
 		fmt.Println("Invalid command")
