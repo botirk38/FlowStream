@@ -1,13 +1,11 @@
 package main
 
 import (
-	// Uncomment this line to pass the first stage
-	// "encoding/json"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strconv"
 	"unicode"
-	"encoding/json"
 	// bencode "github.com/jackpal/bencode-go" // Available if you need it!
 )
 
@@ -33,6 +31,10 @@ func decodeBencode(bencodedString string) (interface{}, error) {
 		}
 
 		return bencodedString[firstColonIndex+1 : firstColonIndex+1+length], nil
+
+	} else if bencodedString[0] == 'i' && rune(bencodedString[len(bencodedString)-1]) == 'e' {
+		return strconv.Atoi(bencodedString[1 : len(bencodedString)-1]) 
+
 	} else {
 		return "", fmt.Errorf("Only strings are supported at the moment")
 	}
@@ -45,14 +47,14 @@ func main() {
 
 	if command == "decode" {
 		bencodedValue := os.Args[2]
-		
-		 decoded, err := decodeBencode(bencodedValue)
+
+		decoded, err := decodeBencode(bencodedValue)
 		if err != nil {
 			fmt.Println(err)
 			return
 		}
-		
-		 jsonOutput, _ := json.Marshal(decoded)
+
+		jsonOutput, _ := json.Marshal(decoded)
 		fmt.Println(string(jsonOutput))
 	} else {
 		fmt.Println("Unknown command: " + command)
