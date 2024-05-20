@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha1"
 	"fmt"
 	bencode "github.com/jackpal/bencode-go"
@@ -8,7 +9,7 @@ import (
 )
 
 type Torrent struct {
-	Announce string
+	Announce string      `bencode:"announce"`
 	Info     TorrentInfo `bencode:"info"`
 }
 
@@ -19,58 +20,43 @@ type TorrentInfo struct {
 	Pieces      string `bencode:"pieces"`
 }
 
-func parseTorrentFile(torrentFilePath string, startIndex int) {
+// Read and decode a torrent file.
+func readTorrentFile(filePath string) (*Torrent, error) {
+	fileData, err := os.Open(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("error reading file: %w", err)
+	}
 
-	torrentInfo, err := os.ReadFile(torrentFilePath)
+	defer fileData.Close()
+
 	var torrent Torrent
-
-	if err != nil {
-		fmt.Println(err)
-		return
+	if err := bencode.Unmarshal(fileData, &torrent); err != nil {
+		return nil, fmt.Errorf("error unmarshalling torrent data: %w", err)
 	}
 
-	decoded, err := Decode(string(torrentInfo), &startIndex)
+	return &torrent, nil
+}
 
-	if err != nil {
-		fmt.Println(err)
-		return
-
-	}
-
-	torrentDict, ok := decoded.(map[string]interface{})
-
-	if !ok {
-		fmt.Println("Error: Decoded value is not a dictionary")
-		return
-	}
-
-	torrent.Announce = torrentDict["announce"].(string)
-	torrent.Info = TorrentInfo{
-		Length:      torrentDict["info"].(map[string]interface{})["length"].(int),
-		Name:        torrentDict["info"].(map[string]interface{})["name"].(string),
-		PieceLength: torrentDict["info"].(map[string]interface{})["piece length"].(int),
-		Pieces:      torrentDict["info"].(map[string]interface{})["pieces"].(string),
+func calculateInfoHash(info *TorrentInfo) ([]byte, error) {
+	var b bytes.Buffer
+	if err := bencode.Marshal(&b, *info); err != nil {
+		return nil, fmt.Errorf("error marshalling torrent info for hashing: %w", err)
 	}
 
 	hash := sha1.New()
+	hash.Write(b.Bytes())
+	return hash.Sum(nil), nil
+}
 
-	if err := bencode.Marshal(hash, torrent.Info); err != nil {
-		fmt.Println(err)
-		return
-	}
-
-	infoHash := hash.Sum(nil)
-
+// Print torrent details.
+func printTorrentDetails(torrent *Torrent, infoHash []byte) {
 	fmt.Printf("Tracker URL: %s\n", torrent.Announce)
 	fmt.Printf("Length: %d\n", torrent.Info.Length)
-
 	fmt.Printf("Info Hash: %x\n", infoHash)
 	fmt.Printf("Piece Length: %d\n", torrent.Info.PieceLength)
 
-	fmt.Printf("Piece Hashes: \n")
-
+	fmt.Println("Piece Hashes: ")
 	for i := 0; i < len(torrent.Info.Pieces); i += 20 {
 		fmt.Printf("%x\n", torrent.Info.Pieces[i:i+20])
 	}
-
 }
