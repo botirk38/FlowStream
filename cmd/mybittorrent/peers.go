@@ -15,7 +15,7 @@ func getPeers(announceURL string, infoHash []byte, left int) ([]string, error) {
 	}
 
 	query := urlLink.Query()
-	query.Set("info_hash", url.QueryEscape(string(infoHash)))
+	query.Set("info_hash", string(infoHash)) 
 	query.Set("peer_id", "00112233445566778899") // Should ideally be a randomly generated peer ID
 	query.Set("port", "6881")
 	query.Set("uploaded", "0")

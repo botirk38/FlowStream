@@ -1,10 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
-
 )
 
 type TrackerResponse struct {
@@ -78,6 +79,62 @@ func main() {
 		}
 
 		printPeers(peers)
+
+	case "handshake":
+		torrentFile := os.Args[2]
+		peerAddr := os.Args[3]
+
+		torrent, err := readTorrentFile(torrentFile)
+
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		infoHash, err := calculateInfoHash(&torrent.Info)
+
+		fmt.Printf("Info Hash: %x\n", infoHash)
+
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		conn, err := net.Dial("tcp", peerAddr)
+
+		buffer := new(bytes.Buffer)
+		buffer.WriteByte(19)
+		buffer.WriteString("BitTorrent protocol")
+		buffer.Write(make([]byte, 8))
+		buffer.Write(infoHash)
+		buffer.WriteString("00112233445566778899")
+
+		_, err = conn.Write(buffer.Bytes())
+
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		response := make([]byte, 1024)
+
+		_, err = conn.Read(response)
+
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		peerId := response[48:68]
+
+		fmt.Printf("Peer ID: %x\n", peerId)
+
+		err = conn.Close()
+
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
 
 	default:
 		fmt.Println("Invalid command")
