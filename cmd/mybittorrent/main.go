@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 )
 
@@ -106,17 +107,17 @@ func main() {
 		fmt.Printf("Peer ID: %s\n", peerConnection.PeerID)
 	case "download_piece":
 		var torrentFile string
-		var outputDir string
+		var outputFile string
 		var pieceIndexStr string
 
 		if args[0] == "-o" {
-			outputDir = args[1]
+			outputFile = args[1]
 			torrentFile = args[2]
 			pieceIndexStr = args[3]
 		} else {
 			torrentFile = args[0]
 			pieceIndexStr = args[1]
-			outputDir = "."
+			outputFile = "piece-" + pieceIndexStr
 		}
 
 		pieceIndex, err := strconv.Atoi(pieceIndexStr)
@@ -155,13 +156,68 @@ func main() {
 			return
 		}
 
-		fmt.Printf("Output directory: %s\n", outputDir)
+		fmt.Printf("Output file: %s\n", outputFile)
 
-		err = DownloadPiece(peerConnection, torrent, pieceIndex, outputDir) 
+		pieceData, err := DownloadPiece(peerConnection, torrent, pieceIndex)
 		if err != nil {
 			fmt.Println("Error downloading piece:", err)
 			return
 		}
+
+		if err := os.WriteFile(outputFile, pieceData, 0644); err != nil {
+			fmt.Printf("Failed to write piece to disk: %s\n", err)
+			return
+		}
+
+		fmt.Printf("Piece %d downloaded to %s.\n", pieceIndex, outputFile)
+
+	case "download":
+		var outputFile string
+		var torrentFile string
+		if args[0] == "-o" {
+			outputFile = args[1]
+			torrentFile = args[2]
+		} else {
+			fmt.Println("Invalid arguments for download command")
+			return
+		}
+
+		torrent, err := readTorrentFile(torrentFile)
+		if err != nil {
+			fmt.Println("Error reading torrent file:", err)
+			return
+		}
+
+		infoHash, err := calculateInfoHash(&torrent.Info)
+		if err != nil {
+			fmt.Println("Error calculating info hash:", err)
+			return
+		}
+
+		peers, err := getPeers(torrent.Announce, infoHash, torrent.Info.Length)
+		if err != nil {
+			fmt.Println("Error getting peers:", err)
+			return
+		}
+
+		if len(peers) == 0 {
+			fmt.Println("No peers available.")
+			return
+		}
+
+		fileData, err := DownloadFile(torrent, peers, infoHash)
+		if err != nil {
+			fmt.Println("Error downloading file:", err)
+			return
+		}
+
+		err = os.WriteFile(outputFile, fileData, 0644)
+		if err != nil {
+			fmt.Println("Error saving file:", err)
+			return
+		}
+
+		fmt.Printf("Downloaded %s to %s.\n", filepath.Base(torrentFile), outputFile)
 
 	default:
 		fmt.Println("Invalid command")
