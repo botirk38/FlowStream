@@ -149,12 +149,23 @@ func main() {
 			return
 		}
 
-		peerAddr := peers[0] // Use the first available peer
-		peerConnection, err := NewPeerConnection(peerAddr, infoHash)
-		if err != nil {
-			fmt.Println("Error establishing connection to peer:", err)
+		var peerConnection *PeerConnection
+
+		for _, peerAddr := range peers {
+			peerConnection, err = NewPeerConnection(peerAddr, infoHash)
+			if err == nil {
+				// Successfully connected to a peer
+				break
+			}
+			fmt.Printf("Failed to connect to peer %s: %v\n", peerAddr, err)
+		}
+
+		if peerConnection == nil {
+			fmt.Println("Error: Unable to connect to any peers")
 			return
 		}
+
+		fmt.Printf("Successfully connected to peer: %s\n", peerConnection.PeerID)
 
 		fmt.Printf("Output file: %s\n", outputFile)
 
