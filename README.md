@@ -1,69 +1,122 @@
+# FLOWSTREAM
 
-# FlowStream 
+![FlowStream Logo](https://cdn-icons-png.flaticon.com/512/6295/6295417.png)
+
+## High-Performance BitTorrent Client
+
+![License](https://img.shields.io/github/license/botirk38/FlowStream?style=default&logo=opensourceinitiative&logoColor=white&color=0074ff)
+![Last Commit](https://img.shields.io/github/last-commit/botirk38/FlowStream?style=default&logo=git&logoColor=white&color=0074ff)
+![Top Language](https://img.shields.io/github/languages/top/botirk38/FlowStream?style=default&color=0074ff)
+![Language Count](https://img.shields.io/github/languages/count/botirk38/FlowStream?style=default&color=0074ff)
+
+## Table of Contents
+- [Overview](#overview)
+- [Features](#features)
+- [Project Structure](#project-structure)
+  - [Project Index](#project-index)
+- [Getting Started](#getting-started)
+  - [Prerequisites](#prerequisites)
+  - [Installation](#installation)
+  - [Usage](#usage)
+  - [Testing](#testing)
+- [Project Roadmap](#project-roadmap)
+- [Contributing](#contributing)
+- [License](#license)
+- [Acknowledgments](#acknowledgments)
+
+---
+
+## Overview
 
 FlowStream is an advanced, high-performance BitTorrent client engineered to optimize peer-to-peer file sharing. Utilizing cutting-edge algorithms and comprehensive network communication protocols, FlowStream is crafted to efficiently handle torrent decoding, peer discovery, and secure file transfers. This robust client is developed in Go, leveraging modular design principles for enhanced scalability and maintainability.
 
-## Key Features
+---
+
+## Features
 
 - **Advanced Torrent File Parsing**: Employs bencode for precision decoding of torrent files, extracting critical metadata including tracker details and file hashes.
-- **Sophisticated Tracker Interaction**: Implements an intelligent algorithm to interact with torrent trackers, ensuring optimal peer discovery and network efficiency.
-- **Robust Peer Communication Protocol**: Manages complex peer handshake mechanisms and supports dynamic file segmentation to optimize download speeds and maintain connection stability.
-- **Enhanced File Download Mechanism**: Incorporates adaptive file download strategies that prioritize pieces based on availability and network conditions, aimed at reducing overall download time and improving data integrity.
+- **Sophisticated Tracker Interaction**: Implements efficient communication protocols to announce client presence and retrieve peer lists from trackers.
+- **Peer Management**: Manages connections with multiple peers, facilitating efficient data exchange and maintaining optimal download and upload rates.
+- **Robust Data Integrity**: Utilizes SHA-1 hashing to verify the integrity of downloaded pieces, ensuring the accuracy and completeness of files.
+- **Efficient Resource Utilization**: Designed with a focus on minimal resource consumption, ensuring high performance even on systems with limited capabilities.
 
-## System Requirements
+---
 
-- Go programming language (version 1.15 or later)
-- Dependencies:
-  - `github.com/jackpal/bencode-go`: Required for the encoding and decoding of Bencode data.
+## Project Structure
 
-## Installation Instructions
-
-1. **Clone the Project Repository:**
-   Clone FlowStream from its repository to your local machine:
-   ```bash
-   git clone https://github.com/botirk38/FlowStream
-   cd cmd/bittorrent 
-   ```
-
-2. **Compile the Source Code:**
-   Build the executable from the source code:
-   ```bash
-   go build -o mybittorrent
-   ```
-
-## Usage Overview
-
-FlowStream supports various operational modes, tailored to different aspects of the BitTorrent protocol:
-
-### Decode Torrent Metadata
-
-Decode and display metadata from a bencoded string:
-
-```bash
-./mybittorrent decode <bencoded-string>
+```sh
+FlowStream/
+├── README.md
+├── cmd/
+│   └── mybittorrent/
+│       ├── decoder.go
+│       ├── download.go
+│       ├── main.go
+│       ├── network.go
+│       ├── peers.go
+│       └── torrent-parser.go
+├── codecrafters.yml
+├── go.mod
+├── go.sum
+├── sample.torrent
+└── your_bittorrent.sh
 ```
 
-### Display Torrent Information
+### Project Index
 
-Extract and present detailed information from a specified torrent file:
+<details>
+  <summary><b>cmd/mybittorrent/</b></summary>
+  
+  - **[decoder.go](cmd/mybittorrent/decoder.go)** - Handles the decoding of bencoded data from torrent files.
+  - **[download.go](cmd/mybittorrent/download.go)** - Manages the downloading of file pieces from connected peers.
+  - **[main.go](cmd/mybittorrent/main.go)** - The entry point of the application, initializing the client.
+  - **[network.go](cmd/mybittorrent/network.go)** - Handles network communications, including peer connections.
+  - **[peers.go](cmd/mybittorrent/peers.go)** - Manages peer information and interactions.
+  - **[torrent-parser.go](cmd/mybittorrent/torrent-parser.go)** - Parses torrent files to extract metadata.
+</details>
 
-```bash
-./mybittorrent info <path-to-torrent-file>
+---
+
+## Getting Started
+
+### Prerequisites
+- Install [Go](https://go.dev/dl/) (version 1.20+ recommended).
+
+### Installation
+```sh
+git clone https://github.com/botirk38/FlowStream.git
+cd FlowStream
+go mod tidy
 ```
 
-### Retrieve Peer Information
-
-Connect to a tracker and fetch peer details for initiating downloads:
-
-```bash
-./mybittorrent peers <path-to-torrent-file>
+### Usage
+```sh
+go run cmd/mybittorrent/main.go sample.torrent
 ```
+
+### Testing
+```sh
+go test ./...
+```
+
+---
+
+## Project Roadmap
+- [ ] Implement DHT support
+- [ ] Optimize peer selection algorithm
+- [ ] Add GUI frontend for user interaction
+
+---
 
 ## Contributing
+Pull requests are welcome! Please follow the coding guidelines and open an issue for major changes.
 
-We encourage contributions from the community! If you are interested in enhancing FlowStream's capabilities or refining existing features, please fork the repository and submit your pull requests for review.
+---
 
-## Licensing
+## License
+This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
 
-FlowStream is made available under the MIT License. For more details, please refer to the [LICENSE](LICENSE) document included in the repository.
+---
 
+## Acknowledgments
+- Inspired by open-source torrent clients like qBittorrent and Transmission.
