@@ -124,7 +124,7 @@ func DownloadFile(torrent *Torrent, peers []string, infoHash []byte) ([]byte, er
 		pieceChannel <- i
 	}
 
-	maxWorkers := 5
+	maxWorkers := 3
 	var wg sync.WaitGroup
 	for i := 0; i < maxWorkers && i < len(peers); i++ {
 		wg.Add(1)
