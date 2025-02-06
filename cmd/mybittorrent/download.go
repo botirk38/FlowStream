@@ -124,24 +124,25 @@ func DownloadFile(torrent *Torrent, peers []string, infoHash []byte) ([]byte, er
 		pieceChannel <- i
 	}
 
+	// Use fewer workers to reduce connection overhead
 	maxWorkers := 3
 	var wg sync.WaitGroup
+
+	// Start workers
 	for i := 0; i < maxWorkers && i < len(peers); i++ {
 		wg.Add(1)
 		go func(peerAddr string) {
 			defer wg.Done()
+
+			// Create a single connection per worker
+			peerConn, err := NewPeerConnection(peerAddr, infoHash)
+			if err != nil {
+				return
+			}
+			defer peerConn.Conn.Close()
+
 			for pieceIndex := range pieceChannel {
-				peerConn, err := NewPeerConnection(peerAddr, infoHash)
-				if err != nil {
-					resultChannel <- struct {
-						index int
-						data  []byte
-						err   error
-					}{pieceIndex, nil, err}
-					continue
-				}
 				pieceData, err := DownloadPiece(peerConn, torrent, pieceIndex)
-				peerConn.Conn.Close()
 				if err != nil {
 					resultChannel <- struct {
 						index int
@@ -150,6 +151,7 @@ func DownloadFile(torrent *Torrent, peers []string, infoHash []byte) ([]byte, er
 					}{pieceIndex, nil, err}
 					continue
 				}
+
 				if verifyPiece(pieceData, []byte(torrent.Info.Pieces[pieceIndex*20:(pieceIndex+1)*20])) {
 					resultChannel <- struct {
 						index int
@@ -171,35 +173,35 @@ func DownloadFile(torrent *Torrent, peers []string, infoHash []byte) ([]byte, er
 	go func() {
 		wg.Wait()
 		close(resultChannel)
+		close(pieceChannel)
 	}()
 
-	// Collect results
+	// Collect results with timeout
 	remainingPieces := numPieces
 	for result := range resultChannel {
 		if result.err != nil {
-			pieceChannel <- result.index // Put the piece back in the channel for retry
+			// Retry failed piece
+			select {
+			case pieceChannel <- result.index:
+			default:
+				return nil, fmt.Errorf("failed to download piece %d: %v", result.index, result.err)
+			}
 		} else {
-			fmt.Println("Collecting results")
 			pieces[result.index] = result.data
 			remainingPieces--
 		}
 
 		if remainingPieces == 0 {
-			close(pieceChannel)
 			break
-		}
-	}
-
-	// Check if all pieces were downloaded successfully
-	for i, piece := range pieces {
-		if piece == nil {
-			return nil, fmt.Errorf("failed to download piece %d", i)
 		}
 	}
 
 	// Combine all pieces
 	fileData := make([]byte, 0, fileSize)
 	for _, piece := range pieces {
+		if piece == nil {
+			return nil, fmt.Errorf("incomplete download: missing pieces")
+		}
 		fileData = append(fileData, piece...)
 	}
 
