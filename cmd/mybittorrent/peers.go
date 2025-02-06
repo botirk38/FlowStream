@@ -44,9 +44,9 @@ type TrackerResponse struct {
 }
 
 type Message struct {
+	Payload []byte
 	Length  uint32
 	ID      byte
-	Payload []byte
 }
 
 func generatePeerID() ([]byte, error) {
