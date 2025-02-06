@@ -3,11 +3,8 @@ package main
 import (
 	"bytes"
 	"crypto/sha1"
-	"encoding/binary"
 	"fmt"
-	"io"
 	"math"
-	"net"
 	"sync"
 )
 
@@ -211,65 +208,4 @@ func DownloadFile(torrent *Torrent, peers []string, infoHash []byte) ([]byte, er
 func verifyPiece(pieceData []byte, expectedHash []byte) bool {
 	hash := sha1.Sum(pieceData)
 	return bytes.Equal(hash[:], expectedHash)
-}
-
-func sendInterestedMessage(conn net.Conn) error {
-	msg := []byte{0, 0, 0, 1, 2} // lengthPrefix = 1, ID = 2 (interested)
-	_, err := conn.Write(msg)
-	return err
-}
-
-func waitForUnchoke(conn net.Conn) error {
-	for {
-		header := make([]byte, 4)
-		if _, err := io.ReadFull(conn, header); err != nil {
-			return err
-		}
-
-		length := binary.BigEndian.Uint32(header)
-		if length == 0 { // Keep-alive message
-			continue
-		}
-
-		payload := make([]byte, length)
-		if _, err := io.ReadFull(conn, payload); err != nil {
-			return err
-		}
-
-		if payload[0] == 1 { // ID for unchoke
-			break
-		}
-	}
-	return nil
-}
-
-func sendRequest(conn net.Conn, index, begin, length uint32) error {
-	buf := new(bytes.Buffer)
-	binary.Write(buf, binary.BigEndian, uint32(13)) // length of the message including ID
-	binary.Write(buf, binary.BigEndian, uint8(6))   // IDRequest
-	binary.Write(buf, binary.BigEndian, index)
-	binary.Write(buf, binary.BigEndian, begin)
-	binary.Write(buf, binary.BigEndian, length)
-	_, err := conn.Write(buf.Bytes())
-	return err
-}
-
-func receiveBlock(conn net.Conn) ([]byte, error) {
-	header := make([]byte, 4)
-	if _, err := io.ReadFull(conn, header); err != nil {
-		return nil, err
-	}
-
-	length := binary.BigEndian.Uint32(header)
-	payload := make([]byte, length)
-	if _, err := io.ReadFull(conn, payload); err != nil {
-		return nil, err
-	}
-
-	if payload[0] != 7 { // ID for piece
-		return nil, fmt.Errorf("expected piece message, got ID %d", payload[0])
-	}
-
-	// Return the block data excluding the first 9 bytes (index, begin)
-	return payload[9:], nil
 }
