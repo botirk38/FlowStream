@@ -230,6 +230,21 @@ func main() {
 
 		fmt.Printf("Downloaded %s to %s.\n", filepath.Base(torrentFile), outputFile)
 
+	case "magnet_parse":
+		if len(args) < 1 {
+			fmt.Println("Missing magnet link argument")
+			return
+		}
+
+		magnetLink, err := ParseMagnetLink(args[0])
+		if err != nil {
+			fmt.Printf("Error parsing magnet link: %v\n", err)
+			return
+		}
+
+		fmt.Printf("Tracker URL: %s\n", magnetLink.TrackerURL)
+		fmt.Printf("Info Hash: %s\n", magnetLink.InfoHash)
+
 	default:
 		fmt.Println("Invalid command")
 		os.Exit(1)
