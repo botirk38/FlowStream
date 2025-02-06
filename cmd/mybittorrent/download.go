@@ -8,14 +8,6 @@ import (
 	"sync"
 )
 
-type PeerMessage struct {
-	lengthPrefix uint32
-	id           uint8
-	index        uint32
-	begin        uint32
-	length       uint32
-}
-
 func DownloadPiece(peerConn *PeerConnection, torrent *Torrent, pieceIndex int) ([]byte, error) {
 	totalPieces := (torrent.Info.Length + torrent.Info.PieceLength - 1) / torrent.Info.PieceLength
 	pieceSize := torrent.Info.PieceLength
