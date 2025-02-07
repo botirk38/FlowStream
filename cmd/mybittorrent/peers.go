@@ -10,7 +10,6 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"strconv"
 )
 
 // Message IDs for the BitTorrent protocol
@@ -32,20 +31,17 @@ const (
 	BlockSize   = 16384 // Standard BitTorrent block size (16KB)
 )
 
-// PeerConnection represents an active connection to a peer
 type PeerConnection struct {
 	InfoHash []byte
 	PeerID   string
 	Conn     net.Conn
 }
 
-// TrackerResponse represents the decoded response from a tracker
 type TrackerResponse struct {
 	Interval int    `bencode:"interval"`
 	Peers    string `bencode:"peers"`
 }
 
-// Message represents a BitTorrent protocol message
 type Message struct {
 	Length  uint32
 	ID      uint8
@@ -53,49 +49,75 @@ type Message struct {
 }
 
 func newMagnetPeerConnection(peerAddr string, infoHash []byte) (*PeerConnection, error) {
-	fmt.Printf("Connecting to peer at %s\n", peerAddr)
+	fmt.Printf("Connecting to peer at: %s\n", peerAddr)
 	conn, err := net.Dial("tcp", peerAddr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to dial peer: %w", err)
 	}
 
+	fmt.Println("Successfully connected to peer")
 	fmt.Println("Generating peer ID...")
 	peerID, err := generatePeerID()
 	if err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("failed to generate peer id: %w", err)
 	}
+
 	fmt.Printf("Generated peer ID: %x\n", peerID)
+	fmt.Println("Creating and sending handshake...")
 
-	fmt.Println("Creating magnet handshake...")
 	handshake := createMagnetHandshake(infoHash, peerID)
-	fmt.Printf("Handshake created, length: %d bytes\n", len(handshake))
 
-	fmt.Println("Sending handshake...")
 	if err := sendHandshake(conn, handshake); err != nil {
 		conn.Close()
 		return nil, err
 	}
 
+	fmt.Println("Handshake sent successfully")
 	fmt.Println("Reading response handshake...")
+
 	responseHandshake, err := readHandshake(conn)
 	if err != nil {
 		conn.Close()
 		return nil, err
 	}
-	fmt.Printf("Response handshake received, length: %d bytes\n", len(responseHandshake))
 
-	responsePeerID := responseHandshake[HandshakeLength-PeerIDLength:]
-	fmt.Printf("Response peer ID: %x\n", responsePeerID)
+	fmt.Printf("Handshake: %x\n", responseHandshake)
+	fmt.Printf("Response handshake received, reserved bytes: %x\n", responseHandshake[5])
+	fmt.Println("Waiting for bitfield message...")
 
+	_, _, err = ReadMessage(conn)
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+
+	fmt.Println("Bitfield message received")
+	extensionSupport := supportsExtensions(responseHandshake)
+	fmt.Printf("Extension support check: %v\n", extensionSupport)
+
+	if extensionSupport {
+		fmt.Println("Peer supports extensions, sending extension handshake...")
+		message := NewExtensionMessageBuilder().
+			WithHandshakePayload().
+			Build()
+
+		_, err = conn.Write(message)
+		if err != nil {
+			conn.Close()
+			return nil, fmt.Errorf("failed to send extension handshake: %w", err)
+		}
+		fmt.Println("Extension handshake sent successfully")
+	}
+
+	fmt.Println("Connection established successfully")
 	return &PeerConnection{
 		InfoHash: infoHash,
-		PeerID:   string(responsePeerID),
+		PeerID:   string(responseHandshake[HandshakeLength-PeerIDLength:]),
 		Conn:     conn,
 	}, nil
 }
 
-// NewPeerConnection establishes a connection with a peer and performs the handshake
 func NewPeerConnection(peerAddr string, infoHash []byte) (*PeerConnection, error) {
 	conn, err := net.Dial("tcp", peerAddr)
 	if err != nil {
@@ -108,7 +130,11 @@ func NewPeerConnection(peerAddr string, infoHash []byte) (*PeerConnection, error
 		return nil, fmt.Errorf("failed to generate peer id: %w", err)
 	}
 
-	handshake := createHandshake(infoHash, peerID)
+	handshake := NewHandshakeBuilder().
+		WithInfoHash(infoHash).
+		WithPeerID(peerID).
+		Build()
+
 	if err := sendHandshake(conn, handshake); err != nil {
 		conn.Close()
 		return nil, err
@@ -147,14 +173,13 @@ func getPeers(announceURL string, infoHash []byte, left int) ([]string, error) {
 		return nil, fmt.Errorf("error generating peer ID: %w", err)
 	}
 
-	query := urlLink.Query()
-	query.Set("info_hash", string(infoHash))
-	query.Set("peer_id", string(peerID))
-	query.Set("port", strconv.Itoa(DefaultPort))
-	query.Set("uploaded", "0")
-	query.Set("downloaded", "0")
-	query.Set("left", strconv.Itoa(left))
-	query.Set("compact", "1")
+	query := NewTrackerQueryBuilder().
+		WithInfoHash(infoHash).
+		WithPeerID(peerID).
+		WithPort(DefaultPort).
+		WithLeft(left).
+		Build()
+
 	urlLink.RawQuery = query.Encode()
 
 	resp, err := http.Get(urlLink.String())
@@ -184,15 +209,12 @@ func parsePeers(peersData string) []string {
 }
 
 func sendMessage(conn net.Conn, id uint8, payload []byte) error {
-	length := uint32(1 + len(payload))
-	buf := make([]byte, 4+length)
-	binary.BigEndian.PutUint32(buf[0:4], length)
-	buf[4] = id
-	if payload != nil {
-		copy(buf[5:], payload)
-	}
+	message := NewMessageBuilder().
+		WithID(id).
+		WithPayload(payload).
+		Build()
 
-	_, err := conn.Write(buf)
+	_, err := conn.Write(message)
 	if err != nil {
 		return fmt.Errorf("failed to send message: %w", err)
 	}
@@ -219,7 +241,11 @@ func ReadMessage(conn net.Conn) (uint8, []byte, error) {
 }
 
 func setupConnection(peerConn *PeerConnection) error {
-	if err := sendMessage(peerConn.Conn, IDInterested, nil); err != nil {
+	interestedMsg := NewMessageBuilder().
+		WithID(IDInterested).
+		Build()
+
+	if _, err := peerConn.Conn.Write(interestedMsg); err != nil {
 		return fmt.Errorf("failed to send interested message: %w", err)
 	}
 
@@ -248,7 +274,6 @@ func waitForUnchoke(conn net.Conn) error {
 		if err != nil {
 			return fmt.Errorf("error waiting for unchoke: %w", err)
 		}
-
 		if id == IDUnchoke {
 			return nil
 		}
@@ -256,12 +281,17 @@ func waitForUnchoke(conn net.Conn) error {
 }
 
 func sendRequest(conn net.Conn, index, begin, length uint32) error {
-	buf := make([]byte, 12)
-	binary.BigEndian.PutUint32(buf[0:4], index)
-	binary.BigEndian.PutUint32(buf[4:8], begin)
-	binary.BigEndian.PutUint32(buf[8:12], length)
+	requestMsg := NewMessageBuilder().
+		WithID(IDRequest).
+		WithPayload(NewRequestPayloadBuilder().
+			WithIndex(index).
+			WithBegin(begin).
+			WithLength(length).
+			Build()).
+		Build()
 
-	return sendMessage(conn, IDRequest, buf)
+	_, err := conn.Write(requestMsg)
+	return err
 }
 
 func receiveBlock(conn net.Conn) ([]byte, error) {
