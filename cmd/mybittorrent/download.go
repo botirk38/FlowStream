@@ -47,16 +47,16 @@ func downloadPiece(peerConn *PeerConnection, pieceIndex int, pieceLength int) ([
 	return pieceData, nil
 }
 
-func DownloadFile(torrent *Torrent, peers []string, infoHash []byte) ([]byte, error) {
+func DownloadFile(torrentInfo *TorrentInfo, peers []string, infoHash []byte) ([]byte, error) {
 	if len(peers) == 0 {
 		return nil, fmt.Errorf("no peers available")
 	}
 
-	workQueue := make(chan pieceWork, len(torrent.Info.Pieces)/20)
-	results := make(chan pieceWork, len(torrent.Info.Pieces)/20)
+	workQueue := make(chan pieceWork, len(torrentInfo.Pieces)/20)
+	results := make(chan pieceWork, len(torrentInfo.Pieces)/20)
 
 	// Initialize work queue with piece offsets
-	initializeWorkQueue(torrent, workQueue)
+	initializeWorkQueue(torrentInfo, workQueue)
 
 	// Start workers
 	var workers sync.WaitGroup
@@ -76,9 +76,9 @@ func DownloadFile(torrent *Torrent, peers []string, infoHash []byte) ([]byte, er
 	}()
 
 	// Collect and assemble results
-	fileData := make([]byte, torrent.Info.Length)
+	fileData := make([]byte, torrentInfo.Length)
 	var downloaded int
-	numPieces := len(torrent.Info.Pieces) / 20
+	numPieces := len(torrentInfo.Pieces) / 20
 
 	for piece := range results {
 		copy(fileData[piece.offset:], piece.hash)
@@ -119,16 +119,16 @@ func worker(peerAddr string, infoHash []byte, workQueue chan pieceWork, results 
 	}
 }
 
-func initializeWorkQueue(torrent *Torrent, workQueue chan pieceWork) {
-	numPieces := len(torrent.Info.Pieces) / 20
+func initializeWorkQueue(torrentInfo *TorrentInfo, workQueue chan pieceWork) {
+	numPieces := len(torrentInfo.Pieces) / 20
 	var offset int64
 
 	for i := 0; i < numPieces; i++ {
-		pieceLength := calculatePieceLength(&torrent.Info, i)
+		pieceLength := calculatePieceLength(torrentInfo, i)
 		work := pieceWork{
 			index:  i,
 			length: pieceLength,
-			hash:   []byte(torrent.Info.Pieces[i*20 : (i+1)*20]),
+			hash:   []byte(torrentInfo.Pieces[i*20 : (i+1)*20]),
 			offset: offset,
 		}
 		offset += int64(pieceLength)
