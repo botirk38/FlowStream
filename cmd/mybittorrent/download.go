@@ -20,13 +20,13 @@ type pieceWork struct {
 	offset int64
 }
 
-func DownloadPiece(peerConn *PeerConnection, torrent *Torrent, pieceIndex int) ([]byte, error) {
+func DownloadPiece(peerConn *PeerConnection, torrentInfo *TorrentInfo, pieceIndex int) ([]byte, error) {
 	if err := setupConnection(peerConn); err != nil {
 		return nil, fmt.Errorf("Failed to establish connection: %w", err)
 
 	}
 
-	pieceLength := calculatePieceLength(torrent, pieceIndex)
+	pieceLength := calculatePieceLength(torrentInfo, pieceIndex)
 	return downloadPiece(peerConn, pieceIndex, pieceLength)
 }
 
@@ -124,7 +124,7 @@ func initializeWorkQueue(torrent *Torrent, workQueue chan pieceWork) {
 	var offset int64
 
 	for i := 0; i < numPieces; i++ {
-		pieceLength := calculatePieceLength(torrent, i)
+		pieceLength := calculatePieceLength(&torrent.Info, i)
 		work := pieceWork{
 			index:  i,
 			length: pieceLength,
@@ -137,15 +137,15 @@ func initializeWorkQueue(torrent *Torrent, workQueue chan pieceWork) {
 	close(workQueue)
 }
 
-func calculatePieceLength(torrent *Torrent, pieceIndex int) int {
-	totalPieces := (torrent.Info.Length + torrent.Info.PieceLength - 1) / torrent.Info.PieceLength
+func calculatePieceLength(torrentInfo *TorrentInfo, pieceIndex int) int {
+	totalPieces := (torrentInfo.Length + torrentInfo.PieceLength - 1) / torrentInfo.PieceLength
 	if pieceIndex == totalPieces-1 {
-		lastPieceSize := torrent.Info.Length % torrent.Info.PieceLength
+		lastPieceSize := torrentInfo.Length % torrentInfo.PieceLength
 		if lastPieceSize != 0 {
 			return lastPieceSize
 		}
 	}
-	return torrent.Info.PieceLength
+	return torrentInfo.PieceLength
 }
 
 func calculateBlockLength(begin, blockSize, pieceLength int) int {

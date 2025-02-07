@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	bencode "github.com/jackpal/bencode-go"
 	"net"
 )
@@ -14,6 +15,12 @@ const (
 type MetadataRequest struct {
 	MessageType int `bencode:"msg_type"`
 	Piece       int `bencode:"piece"`
+}
+
+type MetadataResponse struct {
+	MessageType int `bencode:"msg_type"`
+	Piece       int `bencode:"piece"`
+	TotalSize   int `bencode:"total_size"`
 }
 
 type MetadataRequestBuilder struct {
@@ -60,4 +67,38 @@ func sendMetadataRequest(conn net.Conn, extensionID uint8) error {
 
 	_, err := conn.Write(message)
 	return err
+}
+
+func receiveMetadata(conn net.Conn) (*TorrentInfo, error) {
+	// Read the metadata response message
+	_, payload, err := ReadMessage(conn)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read metadata message: %w", err)
+	}
+
+	// Skip the extension message ID byte
+	payloadData := payload[1:]
+
+	// Find where the bencoded dictionary ends
+	dictEnd := bytes.Index(payloadData, []byte("ee")) + 2
+	if dictEnd == 1 {
+		return nil, fmt.Errorf("invalid metadata response format")
+	}
+
+	// Parse the metadata response dictionary
+	var response MetadataResponse
+	if err := bencode.Unmarshal(bytes.NewReader(payloadData[:dictEnd]), &response); err != nil {
+		return nil, fmt.Errorf("failed to decode metadata response: %w", err)
+	}
+
+	// Extract the actual metadata piece
+	metadataBytes := payloadData[dictEnd:]
+
+	// Parse the metadata info dictionary
+	var metadata TorrentInfo
+	if err := bencode.Unmarshal(bytes.NewReader(metadataBytes), &metadata); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal metadata: %w", err)
+	}
+
+	return &metadata, nil
 }

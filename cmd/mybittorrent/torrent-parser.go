@@ -60,3 +60,13 @@ func printTorrentDetails(torrent *Torrent, infoHash []byte) {
 		fmt.Printf("%x\n", torrent.Info.Pieces[i:i+20])
 	}
 }
+
+func printTorrentInfo(metadata *TorrentInfo) {
+	fmt.Printf("Length: %d\n", metadata.Length)
+	fmt.Printf("Piece Length: %d\n", metadata.PieceLength)
+	fmt.Println("Piece Hashes:")
+
+	for i := 0; i < len(metadata.Pieces); i += 20 {
+		fmt.Printf("%x\n", metadata.Pieces[i:i+20])
+	}
+}
