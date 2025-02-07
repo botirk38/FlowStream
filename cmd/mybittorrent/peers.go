@@ -263,10 +263,6 @@ func setupConnection(peerConn *PeerConnection) error {
 		return fmt.Errorf("failed to send interested message: %w", err)
 	}
 
-	if err := waitForBitfield(peerConn.Conn); err != nil {
-		return fmt.Errorf("failed waiting for bitfield: %w", err)
-	}
-
 	return waitForUnchoke(peerConn.Conn)
 }
 

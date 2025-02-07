@@ -328,6 +328,68 @@ func main() {
 		fmt.Printf("Info Hash: %s\n", magnetLink.InfoHash)
 		printTorrentInfo(metadata)
 
+	case "magnet_download_piece":
+
+		if args[0] != "-o" {
+			fmt.Println("Missing -o flag")
+			return
+		}
+
+		outputFile := args[1]
+		magnetLink, err := ParseMagnetLink(args[2])
+		if err != nil {
+			fmt.Printf("Error parsing magnet link: %v\n", err)
+			return
+		}
+
+		pieceIndex, err := strconv.Atoi(args[3])
+		if err != nil {
+			fmt.Println("Invalid piece index:", err)
+			return
+		}
+
+		infoHashBytes, err := hex.DecodeString(magnetLink.InfoHash)
+		if err != nil {
+			fmt.Printf("Failed to decode info hash: %v\n", err)
+			return
+		}
+
+		peers, err := getPeers(magnetLink.TrackerURL, infoHashBytes, 16384)
+		if err != nil {
+			fmt.Printf("Error getting peers: %v\n", err)
+			return
+		}
+
+		peerConnection, err := newMagnetPeerConnection(peers[0], infoHashBytes)
+		if err != nil {
+			fmt.Printf("Error connecting to peer: %v\n", err)
+			return
+		}
+
+		if err := sendMetadataRequest(peerConnection.Conn, *peerConnection.MetadataExtensionID); err != nil {
+			fmt.Printf("Error sending metadata request: %v\n", err)
+			return
+		}
+
+		metadata, err := receiveMetadata(peerConnection.Conn)
+		if err != nil {
+			fmt.Printf("Error receiving metadata: %v\n", err)
+			return
+		}
+
+		pieceData, err := DownloadPiece(peerConnection, metadata, pieceIndex)
+		if err != nil {
+			fmt.Println("Error downloading piece:", err)
+			return
+		}
+
+		if err := os.WriteFile(outputFile, pieceData, 0644); err != nil {
+			fmt.Printf("Failed to write piece to disk: %s\n", err)
+			return
+		}
+
+		fmt.Printf("Piece %d downloaded to %s.\n", pieceIndex, outputFile)
+
 	default:
 		fmt.Println("Invalid command")
 		os.Exit(1)
