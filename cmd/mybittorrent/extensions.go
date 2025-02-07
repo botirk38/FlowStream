@@ -131,9 +131,10 @@ func (r *ExtensionMessageReader) ReadExtensionMessage() (*ExtensionHandshake, er
 	return &handshake, nil
 }
 
-func GetMetadataExtensionID(handshake *ExtensionHandshake) int {
+func GetMetadataExtensionID(handshake *ExtensionHandshake) uint8 {
 	if id, ok := handshake.M["ut_metadata"]; ok {
-		return id
+		fmt.Printf("ID in GetMetadataExtensionID: %d\n", id)
+		return uint8(id)
 	}
 	return 0
 }

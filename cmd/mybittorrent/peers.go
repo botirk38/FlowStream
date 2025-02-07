@@ -32,9 +32,10 @@ const (
 )
 
 type PeerConnection struct {
-	InfoHash []byte
-	PeerID   string
-	Conn     net.Conn
+	InfoHash            []byte
+	PeerID              string
+	Conn                net.Conn
+	MetadataExtensionID *uint8
 }
 
 type TrackerResponse struct {
@@ -96,6 +97,8 @@ func newMagnetPeerConnection(peerAddr string, infoHash []byte) (*PeerConnection,
 	extensionSupport := supportsExtensions(responseHandshake)
 	fmt.Printf("Extension support check: %v\n", extensionSupport)
 
+	var metadataID *uint8
+
 	if extensionSupport {
 		fmt.Println("Peer supports extensions, sending extension handshake...")
 		message := NewExtensionMessageBuilder().
@@ -108,20 +111,24 @@ func newMagnetPeerConnection(peerAddr string, infoHash []byte) (*PeerConnection,
 			return nil, fmt.Errorf("failed to send extension handshake: %w", err)
 		}
 
-		metadataID, err := handleExtensionHandshake(conn)
+		id, err := handleExtensionHandshake(conn)
+
 		if err != nil {
 			conn.Close()
 			return nil, fmt.Errorf("failed to handle extension handshake: %w", err)
 		}
-		fmt.Printf("Peer Metadata Extension ID: %d\n", metadataID)
+
+		metadataID = &id
+		fmt.Printf("Peer Metadata Extension ID: %d\n", *metadataID)
 		fmt.Println("Extension handshake sent successfully")
 	}
 
 	fmt.Println("Connection established successfully")
 	return &PeerConnection{
-		InfoHash: infoHash,
-		PeerID:   string(responseHandshake[HandshakeLength-PeerIDLength:]),
-		Conn:     conn,
+		InfoHash:            infoHash,
+		PeerID:              string(responseHandshake[HandshakeLength-PeerIDLength:]),
+		Conn:                conn,
+		MetadataExtensionID: metadataID,
 	}, nil
 }
 

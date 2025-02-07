@@ -109,7 +109,7 @@ func readHandshake(conn net.Conn) ([]byte, error) {
 	return response, nil
 }
 
-func handleExtensionHandshake(conn net.Conn) (int, error) {
+func handleExtensionHandshake(conn net.Conn) (uint8, error) {
 	reader := NewExtensionMessageReader(conn)
 	handshake, err := reader.ReadExtensionMessage()
 	if err != nil {
