@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -244,6 +245,42 @@ func main() {
 
 		fmt.Printf("Tracker URL: %s\n", magnetLink.TrackerURL)
 		fmt.Printf("Info Hash: %s\n", magnetLink.InfoHash)
+	case "magnet_handshake":
+
+		if len(args) < 1 {
+			fmt.Println("Missing magnet link argument")
+			return
+		}
+
+		magnetLink, err := ParseMagnetLink(args[0])
+		if err != nil {
+			fmt.Printf("Error parsing magnet link: %v\n", err)
+			return
+		}
+		infoHashBytes, err := hex.DecodeString(magnetLink.InfoHash)
+		if err != nil {
+			fmt.Printf("Failed to decode info hash: %v\n", err)
+			return
+		}
+
+		peers, err := getPeers(magnetLink.TrackerURL, infoHashBytes, 16384)
+		if err != nil {
+			fmt.Printf("Error getting peers: %v\n", err)
+			return
+		}
+
+		if len(peers) == 0 {
+			fmt.Println("No peers available")
+			return
+		}
+
+		peerConnection, err := newMagnetPeerConnection(peers[0], infoHashBytes)
+		if err != nil {
+			fmt.Printf("Error connecting to peer: %v\n", err)
+			return
+		}
+
+		fmt.Printf("Peer ID: %x\n", peerConnection.PeerID)
 
 	default:
 		fmt.Println("Invalid command")

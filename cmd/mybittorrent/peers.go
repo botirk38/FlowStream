@@ -28,14 +28,8 @@ const (
 
 // Protocol constants
 const (
-	ProtocolLength  = 19
-	ProtocolString  = "BitTorrent protocol"
-	ReservedBytes   = 8
-	InfoHashLength  = 20
-	PeerIDLength    = 20
-	HandshakeLength = 1 + ProtocolLength + ReservedBytes + InfoHashLength + PeerIDLength
-	DefaultPort     = 6881
-	BlockSize       = 16384 // Standard BitTorrent block size (16KB)
+	DefaultPort = 6881
+	BlockSize   = 16384 // Standard BitTorrent block size (16KB)
 )
 
 // PeerConnection represents an active connection to a peer
@@ -56,6 +50,49 @@ type Message struct {
 	Length  uint32
 	ID      uint8
 	Payload []byte
+}
+
+func newMagnetPeerConnection(peerAddr string, infoHash []byte) (*PeerConnection, error) {
+	fmt.Printf("Connecting to peer at %s\n", peerAddr)
+	conn, err := net.Dial("tcp", peerAddr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to dial peer: %w", err)
+	}
+
+	fmt.Println("Generating peer ID...")
+	peerID, err := generatePeerID()
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("failed to generate peer id: %w", err)
+	}
+	fmt.Printf("Generated peer ID: %x\n", peerID)
+
+	fmt.Println("Creating magnet handshake...")
+	handshake := createMagnetHandshake(infoHash, peerID)
+	fmt.Printf("Handshake created, length: %d bytes\n", len(handshake))
+
+	fmt.Println("Sending handshake...")
+	if err := sendHandshake(conn, handshake); err != nil {
+		conn.Close()
+		return nil, err
+	}
+
+	fmt.Println("Reading response handshake...")
+	responseHandshake, err := readHandshake(conn)
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+	fmt.Printf("Response handshake received, length: %d bytes\n", len(responseHandshake))
+
+	responsePeerID := responseHandshake[HandshakeLength-PeerIDLength:]
+	fmt.Printf("Response peer ID: %x\n", responsePeerID)
+
+	return &PeerConnection{
+		InfoHash: infoHash,
+		PeerID:   string(responsePeerID),
+		Conn:     conn,
+	}, nil
 }
 
 // NewPeerConnection establishes a connection with a peer and performs the handshake
@@ -88,32 +125,6 @@ func NewPeerConnection(peerAddr string, infoHash []byte) (*PeerConnection, error
 		PeerID:   hex.EncodeToString(responseHandshake[HandshakeLength-PeerIDLength:]),
 		Conn:     conn,
 	}, nil
-}
-
-func createHandshake(infoHash, peerID []byte) []byte {
-	handshake := make([]byte, HandshakeLength)
-	handshake[0] = ProtocolLength
-	copy(handshake[1:ProtocolLength+1], []byte(ProtocolString))
-	copy(handshake[ProtocolLength+ReservedBytes+1:], infoHash)
-	copy(handshake[ProtocolLength+ReservedBytes+InfoHashLength+1:], peerID)
-	return handshake
-}
-
-func sendHandshake(conn net.Conn, handshake []byte) error {
-	_, err := conn.Write(handshake)
-	if err != nil {
-		return fmt.Errorf("failed to send handshake: %w", err)
-	}
-	return nil
-}
-
-func readHandshake(conn net.Conn) ([]byte, error) {
-	response := make([]byte, HandshakeLength)
-	_, err := io.ReadFull(conn, response)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read handshake: %w", err)
-	}
-	return response, nil
 }
 
 func generatePeerID() ([]byte, error) {
