@@ -109,3 +109,13 @@ func readHandshake(conn net.Conn) ([]byte, error) {
 	return response, nil
 }
 
+func handleExtensionHandshake(conn net.Conn) (int, error) {
+	reader := NewExtensionMessageReader(conn)
+	handshake, err := reader.ReadExtensionMessage()
+	if err != nil {
+		return 0, err
+	}
+
+	return GetMetadataExtensionID(handshake), nil
+}
+

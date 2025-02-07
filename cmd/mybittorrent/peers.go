@@ -107,6 +107,13 @@ func newMagnetPeerConnection(peerAddr string, infoHash []byte) (*PeerConnection,
 			conn.Close()
 			return nil, fmt.Errorf("failed to send extension handshake: %w", err)
 		}
+
+		metadataID, err := handleExtensionHandshake(conn)
+		if err != nil {
+			conn.Close()
+			return nil, fmt.Errorf("failed to handle extension handshake: %w", err)
+		}
+		fmt.Printf("Peer Metadata Extension ID: %d\n", metadataID)
 		fmt.Println("Extension handshake sent successfully")
 	}
 

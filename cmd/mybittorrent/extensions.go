@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	bencode "github.com/jackpal/bencode-go"
+	"io"
 	"net"
 )
 
@@ -25,6 +26,14 @@ type ExtensionMessage struct {
 // ExtensionMessageBuilder handles building extension messages
 type ExtensionMessageBuilder struct {
 	message ExtensionMessage
+}
+
+type ExtensionHandshake struct {
+	M map[string]int `bencode:"m"`
+}
+
+type ExtensionMessageReader struct {
+	conn io.Reader
 }
 
 // NewExtensionMessageBuilder creates a new extension message builder
@@ -89,4 +98,42 @@ func sendExtensionHandshake(conn net.Conn) error {
 func supportsExtensions(handshake []byte) bool {
 	// Check the 20th bit (5th byte, bit 4) for extension protocol support
 	return (handshake[ExtensionMessageID+5] & 0x10) == 0x10
+}
+
+func NewExtensionMessageReader(conn io.Reader) *ExtensionMessageReader {
+	return &ExtensionMessageReader{conn: conn}
+}
+
+func (r *ExtensionMessageReader) ReadExtensionMessage() (*ExtensionHandshake, error) {
+	lengthBuf := make([]byte, 4)
+	if _, err := io.ReadFull(r.conn, lengthBuf); err != nil {
+		return nil, err
+	}
+
+	length := binary.BigEndian.Uint32(lengthBuf)
+	if length == 0 {
+		return nil, nil
+	}
+
+	message := make([]byte, length)
+	if _, err := io.ReadFull(r.conn, message); err != nil {
+		return nil, err
+	}
+
+	// Skip the message ID and extension ID
+	payload := message[2:]
+
+	var handshake ExtensionHandshake
+	if err := bencode.Unmarshal(bytes.NewReader(payload), &handshake); err != nil {
+		return nil, err
+	}
+
+	return &handshake, nil
+}
+
+func GetMetadataExtensionID(handshake *ExtensionHandshake) int {
+	if id, ok := handshake.M["ut_metadata"]; ok {
+		return id
+	}
+	return 0
 }
