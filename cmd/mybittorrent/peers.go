@@ -13,45 +13,113 @@ import (
 	"strconv"
 )
 
+// Message IDs for the BitTorrent protocol
 const (
-	IDChoke      = 0
-	IDUnchoke    = 1
-	IDInterested = 2
-	IDHave       = 4
-	IDBitfield   = 5
-	IDRequest    = 6
-	IDPiece      = 7
-	IDCancel     = 8
+	IDChoke         = uint8(0)
+	IDUnchoke       = uint8(1)
+	IDInterested    = uint8(2)
+	IDNotInterested = uint8(3)
+	IDHave          = uint8(4)
+	IDBitfield      = uint8(5)
+	IDRequest       = uint8(6)
+	IDPiece         = uint8(7)
+	IDCancel        = uint8(8)
 )
 
+// Protocol constants
 const (
-	PROTOCOL_LENGTH  = 19
-	PROTOCOL_STRING  = "BitTorrent protocol"
-	RESERVED_BYTES   = 8
-	INFO_HASH_LENGTH = 20
-	PEER_ID_LENGTH   = 20
-	HANDSHAKE_LENGTH = 68 // 1 + 19 + 8 + 20 + 20
+	ProtocolLength  = 19
+	ProtocolString  = "BitTorrent protocol"
+	ReservedBytes   = 8
+	InfoHashLength  = 20
+	PeerIDLength    = 20
+	HandshakeLength = 1 + ProtocolLength + ReservedBytes + InfoHashLength + PeerIDLength
+	DefaultPort     = 6881
+	BlockSize       = 16384 // Standard BitTorrent block size (16KB)
 )
 
+// PeerConnection represents an active connection to a peer
 type PeerConnection struct {
 	InfoHash []byte
 	PeerID   string
 	Conn     net.Conn
 }
 
+// TrackerResponse represents the decoded response from a tracker
 type TrackerResponse struct {
-	Peers string `bencode:"peers"`
+	Interval int    `bencode:"interval"`
+	Peers    string `bencode:"peers"`
 }
 
+// Message represents a BitTorrent protocol message
 type Message struct {
-	Payload []byte
 	Length  uint32
-	ID      byte
+	ID      uint8
+	Payload []byte
+}
+
+// NewPeerConnection establishes a connection with a peer and performs the handshake
+func NewPeerConnection(peerAddr string, infoHash []byte) (*PeerConnection, error) {
+	conn, err := net.Dial("tcp", peerAddr)
+	if err != nil {
+		return nil, fmt.Errorf("failed to dial peer: %w", err)
+	}
+
+	peerID, err := generatePeerID()
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("failed to generate peer id: %w", err)
+	}
+
+	handshake := createHandshake(infoHash, peerID)
+	if err := sendHandshake(conn, handshake); err != nil {
+		conn.Close()
+		return nil, err
+	}
+
+	responseHandshake, err := readHandshake(conn)
+	if err != nil {
+		conn.Close()
+		return nil, err
+	}
+
+	return &PeerConnection{
+		InfoHash: infoHash,
+		PeerID:   hex.EncodeToString(responseHandshake[HandshakeLength-PeerIDLength:]),
+		Conn:     conn,
+	}, nil
+}
+
+func createHandshake(infoHash, peerID []byte) []byte {
+	handshake := make([]byte, HandshakeLength)
+	handshake[0] = ProtocolLength
+	copy(handshake[1:ProtocolLength+1], []byte(ProtocolString))
+	copy(handshake[ProtocolLength+ReservedBytes+1:], infoHash)
+	copy(handshake[ProtocolLength+ReservedBytes+InfoHashLength+1:], peerID)
+	return handshake
+}
+
+func sendHandshake(conn net.Conn, handshake []byte) error {
+	_, err := conn.Write(handshake)
+	if err != nil {
+		return fmt.Errorf("failed to send handshake: %w", err)
+	}
+	return nil
+}
+
+func readHandshake(conn net.Conn) ([]byte, error) {
+	response := make([]byte, HandshakeLength)
+	_, err := io.ReadFull(conn, response)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read handshake: %w", err)
+	}
+	return response, nil
 }
 
 func generatePeerID() ([]byte, error) {
-	id := make([]byte, PEER_ID_LENGTH)
-	if _, err := rand.Read(id); err != nil {
+	id := make([]byte, PeerIDLength)
+	_, err := rand.Read(id)
+	if err != nil {
 		return nil, fmt.Errorf("failed to generate peer ID: %w", err)
 	}
 	return id, nil
@@ -71,21 +139,21 @@ func getPeers(announceURL string, infoHash []byte, left int) ([]string, error) {
 	query := urlLink.Query()
 	query.Set("info_hash", string(infoHash))
 	query.Set("peer_id", string(peerID))
-	query.Set("port", "6881")
+	query.Set("port", strconv.Itoa(DefaultPort))
 	query.Set("uploaded", "0")
 	query.Set("downloaded", "0")
 	query.Set("left", strconv.Itoa(left))
 	query.Set("compact", "1")
 	urlLink.RawQuery = query.Encode()
 
-	response, err := http.Get(urlLink.String())
+	resp, err := http.Get(urlLink.String())
 	if err != nil {
 		return nil, fmt.Errorf("error making HTTP request: %w", err)
 	}
-	defer response.Body.Close()
+	defer resp.Body.Close()
 
 	var trackerRes TrackerResponse
-	if err := bencode.Unmarshal(response.Body, &trackerRes); err != nil {
+	if err := bencode.Unmarshal(resp.Body, &trackerRes); err != nil {
 		return nil, fmt.Errorf("error decoding tracker response: %w", err)
 	}
 
@@ -93,8 +161,10 @@ func getPeers(announceURL string, infoHash []byte, left int) ([]string, error) {
 }
 
 func parsePeers(peersData string) []string {
-	peers := make([]string, 0, len(peersData)/6)
-	for i := 0; i < len(peersData); i += 6 {
+	const peerSize = 6 // 4 bytes for IP + 2 bytes for port
+	peers := make([]string, 0, len(peersData)/peerSize)
+
+	for i := 0; i < len(peersData); i += peerSize {
 		ip := net.IPv4(peersData[i], peersData[i+1], peersData[i+2], peersData[i+3])
 		port := binary.BigEndian.Uint16([]byte{peersData[i+4], peersData[i+5]})
 		peers = append(peers, fmt.Sprintf("%s:%d", ip, port))
@@ -102,19 +172,7 @@ func parsePeers(peersData string) []string {
 	return peers
 }
 
-func SendInterested(conn net.Conn) error {
-	return sendMessage(conn, IDInterested, nil)
-}
-
-func SendRequest(conn net.Conn, index, begin, length int) error {
-	buf := make([]byte, 12)
-	binary.BigEndian.PutUint32(buf[0:4], uint32(index))
-	binary.BigEndian.PutUint32(buf[4:8], uint32(begin))
-	binary.BigEndian.PutUint32(buf[8:12], uint32(length))
-	return sendMessage(conn, IDRequest, buf)
-}
-
-func sendMessage(conn net.Conn, id byte, payload []byte) error {
+func sendMessage(conn net.Conn, id uint8, payload []byte) error {
 	length := uint32(1 + len(payload))
 	buf := make([]byte, 4+length)
 	binary.BigEndian.PutUint32(buf[0:4], length)
@@ -130,7 +188,7 @@ func sendMessage(conn net.Conn, id byte, payload []byte) error {
 	return nil
 }
 
-func ReadMessage(conn net.Conn) (byte, []byte, error) {
+func ReadMessage(conn net.Conn) (uint8, []byte, error) {
 	lengthBuf := make([]byte, 4)
 	if _, err := io.ReadFull(conn, lengthBuf); err != nil {
 		return 0, nil, fmt.Errorf("failed to read message length: %w", err)
@@ -138,7 +196,7 @@ func ReadMessage(conn net.Conn) (byte, []byte, error) {
 
 	length := binary.BigEndian.Uint32(lengthBuf)
 	if length == 0 {
-		return 0, nil, nil
+		return 0, nil, nil // Keep-alive message
 	}
 
 	message := make([]byte, length)
@@ -149,59 +207,37 @@ func ReadMessage(conn net.Conn) (byte, []byte, error) {
 	return message[0], message[1:], nil
 }
 
-func printPeers(peers []string) {
-	for _, peer := range peers {
-		fmt.Println(peer)
+func setupConnection(peerConn *PeerConnection) error {
+	if err := sendMessage(peerConn.Conn, IDInterested, nil); err != nil {
+		return fmt.Errorf("failed to send interested message: %w", err)
 	}
+
+	if err := waitForBitfield(peerConn.Conn); err != nil {
+		return fmt.Errorf("failed waiting for bitfield: %w", err)
+	}
+
+	return waitForUnchoke(peerConn.Conn)
 }
 
-func NewPeerConnection(peerAddr string, infoHash []byte) (*PeerConnection, error) {
-	conn, err := net.Dial("tcp", peerAddr)
+func waitForBitfield(conn net.Conn) error {
+	id, _, err := ReadMessage(conn)
 	if err != nil {
-		return nil, fmt.Errorf("failed to dial peer: %w", err)
+		return err
 	}
 
-	peerID, err := generatePeerID()
-
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate peer id: %w", err)
+	if id != IDBitfield {
+		return fmt.Errorf("expected bitfield message, got %d", id)
 	}
-
-	handshake := make([]byte, HANDSHAKE_LENGTH)
-	handshake[0] = PROTOCOL_LENGTH
-	copy(handshake[1:PROTOCOL_LENGTH+1], []byte(PROTOCOL_STRING))
-	// Reserved bytes are already zeroed
-	copy(handshake[PROTOCOL_LENGTH+RESERVED_BYTES+1:], infoHash)
-	copy(handshake[PROTOCOL_LENGTH+RESERVED_BYTES+INFO_HASH_LENGTH+1:], peerID)
-
-	if _, err = conn.Write(handshake); err != nil {
-		conn.Close()
-		return nil, fmt.Errorf("failed to send handshake: %w", err)
-	}
-
-	response := make([]byte, HANDSHAKE_LENGTH)
-	if _, err = io.ReadFull(conn, response); err != nil {
-		conn.Close()
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	return &PeerConnection{
-		InfoHash: infoHash,
-		PeerID:   hex.EncodeToString(response[HANDSHAKE_LENGTH-PEER_ID_LENGTH:]),
-		Conn:     conn,
-	}, nil
-}
-
-func sendInterestedMessage(conn net.Conn) error {
-	return sendMessage(conn, IDInterested, nil)
+	return nil
 }
 
 func waitForUnchoke(conn net.Conn) error {
 	for {
 		id, _, err := ReadMessage(conn)
 		if err != nil {
-			return err
+			return fmt.Errorf("error waiting for unchoke: %w", err)
 		}
+
 		if id == IDUnchoke {
 			return nil
 		}
@@ -213,17 +249,26 @@ func sendRequest(conn net.Conn, index, begin, length uint32) error {
 	binary.BigEndian.PutUint32(buf[0:4], index)
 	binary.BigEndian.PutUint32(buf[4:8], begin)
 	binary.BigEndian.PutUint32(buf[8:12], length)
+
 	return sendMessage(conn, IDRequest, buf)
 }
 
 func receiveBlock(conn net.Conn) ([]byte, error) {
 	id, payload, err := ReadMessage(conn)
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to receive block: %w", err)
 	}
+
 	if id != IDPiece {
 		return nil, fmt.Errorf("expected piece message, got %d", id)
 	}
+
 	return payload[8:], nil // Skip index and begin fields
+}
+
+func printPeers(peers []string) {
+	for i, peer := range peers {
+		fmt.Printf("Peer %d: %s\n", i+1, peer)
+	}
 }
 

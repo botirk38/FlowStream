@@ -8,193 +8,165 @@ import (
 	"sync"
 )
 
+const (
+	maxRetries    = 3 // Maximum retries for piece download
+	maxConcurrent = 5 // Maximum concurrent piece downloads
+)
+
+type pieceWork struct {
+	index  int
+	length int
+	hash   []byte
+	offset int64
+}
+
 func DownloadPiece(peerConn *PeerConnection, torrent *Torrent, pieceIndex int) ([]byte, error) {
-	totalPieces := (torrent.Info.Length + torrent.Info.PieceLength - 1) / torrent.Info.PieceLength
-	pieceSize := torrent.Info.PieceLength
-	if pieceIndex == totalPieces-1 {
-		lastPieceSize := torrent.Info.Length % torrent.Info.PieceLength
-		if lastPieceSize != 0 {
-			pieceSize = lastPieceSize
+	if err := setupConnection(peerConn); err != nil {
+		return nil, fmt.Errorf("Failed to establish connection: %w", err)
+
+	}
+
+	pieceLength := calculatePieceLength(torrent, pieceIndex)
+	return downloadPiece(peerConn, pieceIndex, pieceLength)
+}
+
+func downloadPiece(peerConn *PeerConnection, pieceIndex int, pieceLength int) ([]byte, error) {
+	numBlocks := int(math.Ceil(float64(pieceLength) / float64(BlockSize)))
+	pieceData := make([]byte, pieceLength)
+
+	for blockIndex := 0; blockIndex < numBlocks; blockIndex++ {
+		begin := blockIndex * BlockSize
+		length := calculateBlockLength(begin, BlockSize, pieceLength)
+
+		if err := downloadBlock(peerConn, pieceIndex, begin, length, pieceData); err != nil {
+			return nil, fmt.Errorf("download block %d: %w", blockIndex, err)
 		}
-	}
-	numBlocks := int(math.Ceil(float64(pieceSize) / 16384))
-
-	if err := sendInterestedMessage(peerConn.Conn); err != nil {
-		return nil, err
-	}
-	if err := waitForUnchoke(peerConn.Conn); err != nil {
-		return nil, err
-	}
-
-	pieceData := make([]byte, pieceSize)
-	pendingRequests := make(chan int, 5) // Buffer for 5 pending requests
-	results := make(chan struct {
-		blockIndex int
-		data       []byte
-		err        error
-	}, 5)
-
-	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
-		for blockIndex := range pendingRequests {
-			begin := blockIndex * 16384
-			blockSize := 16384
-			if blockIndex == numBlocks-1 {
-				blockSize = pieceSize - begin
-			}
-			if err := sendRequest(peerConn.Conn, uint32(pieceIndex), uint32(begin), uint32(blockSize)); err != nil {
-				results <- struct {
-					blockIndex int
-					data       []byte
-					err        error
-				}{blockIndex, nil, err}
-				return
-			}
-			blockData, err := receiveBlock(peerConn.Conn)
-			results <- struct {
-				blockIndex int
-				data       []byte
-				err        error
-			}{blockIndex, blockData, err}
-		}
-	}()
-
-	go func() {
-		wg.Wait()
-		close(results)
-	}()
-
-	for i := 0; i < numBlocks; i++ {
-		pendingRequests <- i
-		if i >= 4 { // Start collecting results after sending 5 requests
-			result := <-results
-			if result.err != nil {
-				close(pendingRequests)
-				return nil, result.err
-			}
-			copy(pieceData[result.blockIndex*16384:], result.data)
-			fmt.Printf("Block %d downloaded.\n", result.blockIndex)
-		}
-	}
-	close(pendingRequests)
-
-	// Collect remaining results
-	for result := range results {
-		if result.err != nil {
-			return nil, result.err
-		}
-		copy(pieceData[result.blockIndex*16384:], result.data)
-		fmt.Printf("Block %d downloaded.\n", result.blockIndex)
-	}
-
-	if len(pieceData) != pieceSize {
-		return nil, fmt.Errorf("incomplete piece: received %d bytes, expected %d bytes", len(pieceData), pieceSize)
+		fmt.Printf("Block %d downloaded.\n", blockIndex)
 	}
 
 	return pieceData, nil
 }
 
 func DownloadFile(torrent *Torrent, peers []string, infoHash []byte) ([]byte, error) {
-	numPieces := len(torrent.Info.Pieces) / 20
-	fileSize := torrent.Info.Length
-
-	pieces := make([][]byte, numPieces)
-	pieceChannel := make(chan int, numPieces)
-	resultChannel := make(chan struct {
-		index int
-		data  []byte
-		err   error
-	}, numPieces)
-
-	// Initialize piece channel
-	for i := 0; i < numPieces; i++ {
-		pieceChannel <- i
+	if len(peers) == 0 {
+		return nil, fmt.Errorf("no peers available")
 	}
 
-	// Use fewer workers to reduce connection overhead
-	maxWorkers := 3
-	var wg sync.WaitGroup
+	workQueue := make(chan pieceWork, len(torrent.Info.Pieces)/20)
+	results := make(chan pieceWork, len(torrent.Info.Pieces)/20)
+
+	// Initialize work queue with piece offsets
+	initializeWorkQueue(torrent, workQueue)
 
 	// Start workers
-	for i := 0; i < maxWorkers && i < len(peers); i++ {
-		wg.Add(1)
+	var workers sync.WaitGroup
+	numWorkers := min(len(peers), maxConcurrent)
+	for i := 0; i < numWorkers; i++ {
+		workers.Add(1)
 		go func(peerAddr string) {
-			defer wg.Done()
-
-			// Create a single connection per worker
-			peerConn, err := NewPeerConnection(peerAddr, infoHash)
-			if err != nil {
-				return
-			}
-			defer peerConn.Conn.Close()
-
-			for pieceIndex := range pieceChannel {
-				pieceData, err := DownloadPiece(peerConn, torrent, pieceIndex)
-				if err != nil {
-					resultChannel <- struct {
-						index int
-						data  []byte
-						err   error
-					}{pieceIndex, nil, err}
-					continue
-				}
-
-				if verifyPiece(pieceData, []byte(torrent.Info.Pieces[pieceIndex*20:(pieceIndex+1)*20])) {
-					resultChannel <- struct {
-						index int
-						data  []byte
-						err   error
-					}{pieceIndex, pieceData, nil}
-				} else {
-					resultChannel <- struct {
-						index int
-						data  []byte
-						err   error
-					}{pieceIndex, nil, fmt.Errorf("piece verification failed")}
-				}
-			}
+			defer workers.Done()
+			worker(peerAddr, infoHash, workQueue, results)
 		}(peers[i])
 	}
 
-	// Close channels when all workers are done
+	// Close results when all workers are done
 	go func() {
-		wg.Wait()
-		close(resultChannel)
-		close(pieceChannel)
+		workers.Wait()
+		close(results)
 	}()
 
-	// Collect results with timeout
-	remainingPieces := numPieces
-	for result := range resultChannel {
-		if result.err != nil {
-			// Retry failed piece
-			select {
-			case pieceChannel <- result.index:
-			default:
-				return nil, fmt.Errorf("failed to download piece %d: %v", result.index, result.err)
-			}
-		} else {
-			pieces[result.index] = result.data
-			remainingPieces--
-		}
+	// Collect and assemble results
+	fileData := make([]byte, torrent.Info.Length)
+	var downloaded int
+	numPieces := len(torrent.Info.Pieces) / 20
 
-		if remainingPieces == 0 {
+	for piece := range results {
+		copy(fileData[piece.offset:], piece.hash)
+		downloaded++
+		if downloaded == numPieces {
 			break
 		}
 	}
 
-	// Combine all pieces
-	fileData := make([]byte, 0, fileSize)
-	for _, piece := range pieces {
-		if piece == nil {
-			return nil, fmt.Errorf("incomplete download: missing pieces")
-		}
-		fileData = append(fileData, piece...)
+	return fileData, nil
+}
+
+func worker(peerAddr string, infoHash []byte, workQueue chan pieceWork, results chan pieceWork) {
+	peerConn, err := NewPeerConnection(peerAddr, infoHash)
+	if err != nil {
+		return
+	}
+	defer peerConn.Conn.Close()
+
+	if err := setupConnection(peerConn); err != nil {
+		return
 	}
 
-	return fileData[:fileSize], nil
+	for work := range workQueue {
+		for retry := 0; retry < maxRetries; retry++ {
+			pieceData, err := downloadPiece(peerConn, work.index, work.length)
+			if err != nil {
+				continue
+			}
+
+			if verifyPiece(pieceData, work.hash) {
+				work.hash = pieceData // Store the actual data in the hash field
+				results <- work
+				fmt.Printf("Piece %d downloaded and verified.\n", work.index)
+				break
+			}
+		}
+	}
+}
+
+func initializeWorkQueue(torrent *Torrent, workQueue chan pieceWork) {
+	numPieces := len(torrent.Info.Pieces) / 20
+	var offset int64
+
+	for i := 0; i < numPieces; i++ {
+		pieceLength := calculatePieceLength(torrent, i)
+		work := pieceWork{
+			index:  i,
+			length: pieceLength,
+			hash:   []byte(torrent.Info.Pieces[i*20 : (i+1)*20]),
+			offset: offset,
+		}
+		offset += int64(pieceLength)
+		workQueue <- work
+	}
+	close(workQueue)
+}
+
+func calculatePieceLength(torrent *Torrent, pieceIndex int) int {
+	totalPieces := (torrent.Info.Length + torrent.Info.PieceLength - 1) / torrent.Info.PieceLength
+	if pieceIndex == totalPieces-1 {
+		lastPieceSize := torrent.Info.Length % torrent.Info.PieceLength
+		if lastPieceSize != 0 {
+			return lastPieceSize
+		}
+	}
+	return torrent.Info.PieceLength
+}
+
+func calculateBlockLength(begin, blockSize, pieceLength int) int {
+	if begin+blockSize > pieceLength {
+		return pieceLength - begin
+	}
+	return blockSize
+}
+
+func downloadBlock(peerConn *PeerConnection, pieceIndex, begin, length int, pieceData []byte) error {
+	if err := sendRequest(peerConn.Conn, uint32(pieceIndex), uint32(begin), uint32(length)); err != nil {
+		return err
+	}
+
+	blockData, err := receiveBlock(peerConn.Conn)
+	if err != nil {
+		return err
+	}
+
+	copy(pieceData[begin:], blockData)
+	return nil
 }
 
 func verifyPiece(pieceData []byte, expectedHash []byte) bool {
